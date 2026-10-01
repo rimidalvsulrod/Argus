@@ -5,7 +5,7 @@ Turn an Android phone into a camera tripwire. Detects **humans, movement, light 
 ## Deploy (Vercel)
 1. Import this repo in Vercel.
 2. **Storage → Marketplace → Upstash Redis** → connect to the project (adds `KV_REST_API_URL` / `KV_REST_API_TOKEN`).
-3. Add env var **`ARGUS_KEY`** = your secret access key.
+3. Optional: set env var **`ARGUS_KEY`** to override the default access key (`123`).
 4. Deploy. (Without Redis it falls back to server memory, which is unreliable on serverless.)
 
 ## Use
@@ -16,6 +16,6 @@ Turn an Android phone into a camera tripwire. Detects **humans, movement, light 
 ## Notes
 - Requires HTTPS (Vercel provides it) for camera/mic. Background tabs and locked screens throttle browsers — keep Sentry in the foreground.
 - Console polls every 4s while visible (1 Redis command per poll); Sentry heartbeats every 15s.
-- Local dev: `npm i && npm run dev` (access key defaults to `argus`).
+- Local dev: `npm i && npm run dev` (access key defaults to `123`).
 
 _Deployed on Vercel._
