@@ -17,3 +17,5 @@ Turn an Android phone into a camera tripwire. Detects **humans, movement, light 
 - Requires HTTPS (Vercel provides it) for camera/mic. Background tabs and locked screens throttle browsers — keep Sentry in the foreground.
 - Console polls every 4s while visible (1 Redis command per poll); Sentry heartbeats every 15s.
 - Local dev: `npm i && npm run dev` (access key defaults to `argus`).
+
+_Deployed on Vercel._
