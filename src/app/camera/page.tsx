@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Crosshair, Eye, EyeOff, RefreshCw, ScanFace, X } from "lucide-react";
+import { Crosshair, Eye, EyeOff, Radar, RefreshCw, ScanFace, X } from "lucide-react";
 import { api, getKey } from "@/lib/api";
 import { Engine } from "@/lib/engine";
 import { paint } from "@/lib/overlay";
@@ -150,26 +150,26 @@ export default function Camera() {
   }
 
   const s = hud?.stats;
-  const cal = !s ? "" : s.calibState === 1 ? `ZEROING ${Math.round((hud!.prog || 0) * 100)}%` : s.calibState === 2 ? `DEV ${s.dev.toFixed(1)}%` : "NOT ZEROED";
+  const cal = !s ? "" : s.calibState === 1 ? `Zeroing ${Math.round((hud!.prog || 0) * 100)}%` : s.calibState === 2 ? `Δ ${s.dev.toFixed(1)}%` : "Not zeroed";
 
   if (phase === "idle") return (
     <div className="center">
-      <div className="bg-grid" />
-      <div className="auth" style={{ position: "relative" }}>
-        <div className="hero-mark"><Eye size={26} /></div>
-        <div><div style={{ fontSize: 22, fontWeight: 700, letterSpacing: ".14em" }}>SENTRY</div><div className="mut">Turns this phone into the camera.</div></div>
-        <div className="card sm mut" style={{ display: "grid", gap: 8 }}>
-          <div>• Prop the phone where it can see the room and plug it into power.</div>
-          <div>• Keep this page open in the foreground — it holds the screen awake. Use <b>Stealth</b> to black out the screen.</div>
-          <div>• The scene is zeroed automatically on start. Hold still for 3 seconds.</div>
+      <div className="aurora" /><div className="gridbg" />
+      <div className="auth">
+        <div style={{ display: "grid", justifyItems: "center", gap: 16, textAlign: "center" }}>
+          <div className="mark lg"><Radar size={28} strokeWidth={2.2} /></div>
+          <div><div className="h1" style={{ fontSize: 28 }}>Sentry mode</div><div className="mut">This device becomes the camera.</div></div>
         </div>
-        {err && <div className="card sm" style={{ color: "var(--bad)", borderColor: "rgba(244,63,94,.4)" }}>{err}</div>}
-        <button className="btn pri lg" onClick={() => begin(facing)}>Activate sentry</button>
-        <div className="row" style={{ justifyContent: "center" }}>
-          <button className="btn ghost sm" onClick={() => setFacing(facing === "environment" ? "user" : "environment")}>
-            <RefreshCw size={14} /> {facing === "environment" ? "Rear camera" : "Front camera"}
-          </button>
+        <div className="card bullets" style={{ padding: 20 }}>
+          <div><span className="n">1</span><div><b>Position it.</b> Prop the phone where it sees the room and plug it in.</div></div>
+          <div><span className="n">2</span><div><b>Keep it open.</b> The screen stays awake; use Stealth to black it out.</div></div>
+          <div><span className="n">3</span><div><b>Hold still.</b> The scene is zeroed automatically in the first 3 seconds.</div></div>
         </div>
+        {err && <div className="card sm" style={{ color: "var(--bad)", borderColor: "rgba(251,113,133,.35)", padding: 14 }}>{err}</div>}
+        <button className="btn pri lg" onClick={() => begin(facing)}><Radar size={18} />Activate sentry</button>
+        <button className="btn ghost sm" style={{ justifySelf: "center" }} onClick={() => setFacing(facing === "environment" ? "user" : "environment")}>
+          <RefreshCw size={14} /> Using {facing === "environment" ? "rear" : "front"} camera
+        </button>
       </div>
       <video ref={videoRef} playsInline muted style={{ display: "none" }} />
     </div>
@@ -178,44 +178,47 @@ export default function Camera() {
   return (
     <div className="sentry">
       <div className="view" ref={viewRef}>
-        <div className="frame scan" style={{ width: box.w, height: box.h }}>
+        <div className="frame" style={{ width: box.w, height: box.h }}>
           <video ref={videoRef} playsInline muted />
           <canvas ref={canvasRef} />
         </div>
-        <div className="hud" style={{ position: "absolute", top: 10, left: 10, right: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
-          <span className={`pill ${hud?.armed ? "ok" : "warn"}`}><span className="dot pulse" />{hud?.armed ? "Armed" : "Disarmed"}</span>
-          <span className={`pill ${hud?.ready ? "ac" : "warn"}`}>{hud?.ready ? "AI online" : "Loading AI…"}</span>
-          <span className={`pill ${hud?.link ? "ac" : ""}`}>{hud?.link ? `Link · ${hud.viewers} watching` : "Link offline"}</span>
-          {s && <span className="pill mono">{cal}</span>}
-          {s && s.light < 25 && <span className="pill warn">Low light</span>}
-        </div>
-        {flash && <div className="pill bad" style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", fontSize: 12 }}><span className="dot" />{flash}</div>}
       </div>
-      <div className="bar">
-        <div className="stats">
-          {[["Motion", s ? `${(s.motion * 100).toFixed(1)}%` : "–"], ["Light", s ? s.light.toFixed(0) : "–"], ["Sound", s ? (s.sound * 100).toFixed(1) : "–"], ["Bodies", s ? `${s.persons}/${s.faces}` : "–"]].map(([k, v]) => (
-            <div className="stat" key={k}><div className="k">{k}</div><div className="v">{v}</div></div>
+      <div className="shade" />
+      <div className="topbar">
+        <span className="brand" style={{ marginRight: 6 }}><span className="mark" style={{ width: 26, height: 26, borderRadius: 8 }}><Eye size={14} strokeWidth={2.4} /></span></span>
+        <span className={`chip glass-chip ${hud?.armed ? "ok" : "warn"}`}><span className="dot pulse" />{hud?.armed ? "Armed" : "Disarmed"}</span>
+        <span className={`chip glass-chip ${hud?.ready ? "" : "warn"}`}>{hud?.ready ? "AI online" : "Loading AI…"}</span>
+        <span className={`chip glass-chip ${hud?.viewers ? "ac" : ""}`}>{hud?.link ? (hud.viewers ? `${hud.viewers} watching` : "Link ready") : "Link offline"}</span>
+        {s && <span className="chip glass-chip mono">{cal}</span>}
+        {s && s.light < 25 && <span className="chip glass-chip warn">Low light</span>}
+      </div>
+      {flash && <div className="chip bad flash" style={{ height: 34, fontSize: 13, background: "rgba(40,10,18,.8)", backdropFilter: "blur(14px)" }}><span className="dot" />{flash}</div>}
+      <div className="dock">
+        <div className="readouts">
+          {[["Motion", s ? `${(s.motion * 100).toFixed(1)}%` : "–"], ["Light", s ? s.light.toFixed(0) : "–"], ["Sound", s ? (s.sound * 100).toFixed(1) : "–"], ["Tracked", s ? `${s.persons} · ${s.faces}` : "–"]].map(([k, v]) => (
+            <div key={k}><div className="k">{k}</div><div className="v">{v}</div></div>
           ))}
         </div>
         <div className="tools">
-          <button className="btn" onClick={() => engineRef.current?.calibrate()}><Crosshair size={18} />Zero</button>
-          <button className="btn" onClick={() => { setSheet(true); setMsg(""); }}><ScanFace size={18} />Learn face</button>
-          <button className="btn" onClick={() => { const f = facing === "environment" ? "user" : "environment"; setFacing(f); begin(f); }}><RefreshCw size={18} />Flip</button>
-          <button className="btn" onClick={() => setStealth(true)}><EyeOff size={18} />Stealth</button>
+          <button className="tool pri" onClick={() => engineRef.current?.calibrate()}><span><Crosshair size={22} /></span>Zero</button>
+          <button className="tool" onClick={() => { setSheet(true); setMsg(""); }}><span><ScanFace size={22} /></span>Learn face</button>
+          <button className="tool" onClick={() => { const f = facing === "environment" ? "user" : "environment"; setFacing(f); begin(f); }}><span><RefreshCw size={22} /></span>Flip</button>
+          <button className="tool" onClick={() => setStealth(true)}><span><EyeOff size={22} /></span>Stealth</button>
         </div>
       </div>
       {sheet && (
         <div className="sheet" onClick={() => setSheet(false)}>
           <div onClick={(e) => e.stopPropagation()}>
-            <div className="row between"><b>Learn a face</b><button className="btn ghost icon" onClick={() => setSheet(false)}><X size={18} /></button></div>
-            <div className="sm mut">One person in frame, facing the camera, good light. Repeat a few times from different angles.</div>
+            <div className="grab" />
+            <div className="row between"><div className="title" style={{ fontSize: 18 }}>Learn a face</div><button className="btn ghost icon sm" onClick={() => setSheet(false)}><X size={18} /></button></div>
+            <div className="sm mut">One person in frame, facing the camera in good light. Capture 3–5 samples from slightly different angles.</div>
             <input className="input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
             <button className="btn pri lg" onClick={learn}><ScanFace size={18} />Capture sample</button>
-            {msg && <div className="sm mut">{msg}</div>}
+            {msg && <div className="sm mut" style={{ textAlign: "center" }}>{msg}</div>}
           </div>
         </div>
       )}
-      {stealth && <div className="stealth" onClick={() => setStealth(false)}>Sentry active — tap to wake</div>}
+      {stealth && <div className="stealth" onClick={() => setStealth(false)}>Sentry active · tap to wake</div>}
     </div>
   );
 }

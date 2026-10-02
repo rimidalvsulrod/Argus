@@ -14,11 +14,11 @@ type Tele = { scene: Scene; stats: Stats; prog: number; armed: boolean; ready: b
 type Tab = "live" | "alerts" | "detect" | "faces";
 
 const META: Record<string, { c: string; Icon: typeof Activity; name: string }> = {
-  person: { c: "#f43f5e", Icon: PersonStanding, name: "Human" },
-  face_unknown: { c: "#f43f5e", Icon: UserX, name: "Unknown face" },
-  face_known: { c: "#10b981", Icon: UserCheck, name: "Known face" },
-  motion: { c: "#f59e0b", Icon: Activity, name: "Motion" },
-  light: { c: "#eab308", Icon: Lightbulb, name: "Light" },
+  person: { c: "#fb7185", Icon: PersonStanding, name: "Human" },
+  face_unknown: { c: "#fb7185", Icon: UserX, name: "Unknown face" },
+  face_known: { c: "#34d399", Icon: UserCheck, name: "Known face" },
+  motion: { c: "#fbbf24", Icon: Activity, name: "Motion" },
+  light: { c: "#facc15", Icon: Lightbulb, name: "Light" },
   sound: { c: "#a78bfa", Icon: Waves, name: "Sound" },
   change: { c: "#22d3ee", Icon: Crosshair, name: "Deviation" },
 };
@@ -33,10 +33,32 @@ function Toggle({ on, set }: { on: boolean; set: (v: boolean) => void }) {
 }
 function Range({ label, value, min, max, step = 1, fmt, set }: { label: string; value: number; min: number; max: number; step?: number; fmt?: (v: number) => string; set: (v: number) => void }) {
   return (
-    <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
-      <div className="row between sm"><span className="mut">{label}</span><span className="mono">{fmt ? fmt(value) : value}</span></div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => set(+e.target.value)} />
+    <div style={{ display: "grid", gap: 4, marginTop: 14 }}>
+      <div className="row between sm"><span className="mut">{label}</span><span className="mono" style={{ fontSize: 12.5 }}>{fmt ? fmt(value) : value}</span></div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => set(+e.target.value)}
+        style={{ "--p": `${((value - min) / (max - min)) * 100}%` } as React.CSSProperties} />
     </div>
+  );
+}
+// 240° radial gauge with a trip marker
+function Gauge({ value, trip, max, color, active }: { value: number; trip: number; max: number; color: string; active: boolean }) {
+  const cx = 120, cy = 118, R = 96, A0 = 150, SW = 240;
+  const pt = (f: number, r = R) => { const a = ((A0 + SW * f) * Math.PI) / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+  const arc = (f0: number, f1: number) => { const [x0, y0] = pt(f0), [x1, y1] = pt(f1); return `M ${x0} ${y0} A ${R} ${R} 0 ${SW * (f1 - f0) > 180 ? 1 : 0} 1 ${x1} ${y1}`; };
+  const f = Math.min(1, Math.max(0.001, value / max)), ft = Math.min(1, trip / max);
+  const [tx0, ty0] = pt(ft, R - 16), [tx1, ty1] = pt(ft, R + 16);
+  return (
+    <svg viewBox="0 0 240 205">
+      <defs>
+        <linearGradient id="gg" x1="0" x2="1"><stop offset="0" stopColor="#22d3ee" /><stop offset="1" stopColor={color} /></linearGradient>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5" /></filter>
+      </defs>
+      {Array.from({ length: 41 }, (_, i) => { const [a, b] = pt(i / 40, R + 14), [c, d] = pt(i / 40, R + (i % 5 ? 18 : 22)); return <line key={i} x1={a} y1={b} x2={c} y2={d} stroke="rgba(255,255,255,.14)" strokeWidth={i % 5 ? 1 : 1.6} />; })}
+      <path d={arc(0, 1)} stroke="rgba(255,255,255,.07)" strokeWidth="12" fill="none" strokeLinecap="round" />
+      {active && <path d={arc(0, f)} stroke={color} strokeWidth="12" fill="none" strokeLinecap="round" filter="url(#glow)" opacity=".55" />}
+      {active && <path d={arc(0, f)} stroke="url(#gg)" strokeWidth="12" fill="none" strokeLinecap="round" style={{ transition: "d .25s" }} />}
+      <line x1={tx0} y1={ty0} x2={tx1} y2={ty1} stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -185,81 +207,51 @@ export default function Console() {
 
   if (!engaged) return (
     <div className="center">
-      <div className="bg-grid" />
-      <div className="auth" style={{ position: "relative", textAlign: "center", justifyItems: "center" }}>
-        <div className="hero-mark"><Radar size={26} /></div>
-        <div><div style={{ fontSize: 22, fontWeight: 700, letterSpacing: ".14em" }}>CONSOLE</div><div className="mut">Tap to enable alarm sound and notifications on this device.</div></div>
+      <div className="aurora" /><div className="gridbg" />
+      <div className="auth" style={{ textAlign: "center", justifyItems: "center" }}>
+        <div className="mark lg"><Eye size={28} strokeWidth={2.2} /></div>
+        <div><div className="h1" style={{ fontSize: 28 }}>Console</div><div className="mut" style={{ maxWidth: 320 }}>Tap once to enable alarm sound and notifications on this device.</div></div>
         <button className="btn pri lg" onClick={() => { unlockAudio(); playAlarm("alert", 0.15); if (typeof Notification !== "undefined") Notification.requestPermission(); setEngaged(true); }}>Engage console</button>
       </div>
     </div>
   );
 
-  // ---------- sections ----------
-  const live = (
-    <div className="grid2">
-      <div className="stack">
-        <div ref={stageRef} className={`stage ${hasStream ? "scan" : ""}`} style={{ aspectRatio: ratio }}>
-          <video ref={videoRef} playsInline autoPlay muted onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.videoWidth) setRatio(v.videoWidth / v.videoHeight); }} style={{ display: hasStream ? "block" : "none" }} />
-          {!hasStream && hb?.thumb && online && <img src={hb.thumb} alt="Latest frame" />}
-          <canvas ref={canvasRef} />
-          {!hasStream && !(hb?.thumb && online) && (
-            <div className="empty"><div><Radar size={30} style={{ opacity: .5 }} /><div style={{ marginTop: 8 }}>{online ? "Connecting to sentry…" : "Sentry offline"}</div><div className="sm dim">{online ? "Establishing peer link" : "Open /camera on the phone and tap Activate"}</div></div></div>
-          )}
-          <div className="hud">
-            {hasStream ? <span className="pill bad"><span className="dot pulse" />Live</span>
-              : online && hb?.thumb ? <span className="pill warn">Relay · {ago(hb.ts)}</span>
-              : <span className="pill">{link === "connecting" ? "Connecting" : "No signal"}</span>}
-            {st && <span className="pill mono">{st.persons} body · {st.faces} face</span>}
-            {st && st.light < 25 && <span className="pill warn">Low light</span>}
-          </div>
-          <div className="corner">
-            <button className="btn icon" title="Overlay" onClick={() => setOverlay(!overlay)}>{overlay ? <Eye size={16} /> : <EyeOff size={16} />}</button>
-            <button className="btn icon" title="Listen" onClick={() => setListen(!listen)} disabled={!hasStream}>{listen ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
-            <button className="btn icon" title="Fullscreen" onClick={() => stageRef.current?.requestFullscreen?.()}><Maximize2 size={16} /></button>
-          </div>
-        </div>
-        <div className="stats">
-          {[["Motion", st ? `${(st.motion * 100).toFixed(1)}%` : "–"], ["Light", st ? st.light.toFixed(0) : "–"], ["Sound", st ? (st.sound * 100).toFixed(1) : "–"], ["Deviation", st?.calibState === 2 ? `${st.dev.toFixed(1)}%` : "–"]].map(([k, v]) => (
-            <div className="stat" key={k}><div className="k">{k}</div><div className="v">{v}</div></div>
-          ))}
-        </div>
-        {!hasStream && online && <div className="sm dim">Live video uses a direct peer-to-peer link. If it can&apos;t connect (some mobile networks block it), you&apos;ll see a relay frame refreshed every 15s.</div>}
-      </div>
-      <div className="stack">
-        {calibCard()}
-        <div className="card">
-          <div className="card-h"><div className="card-t"><Bell size={14} />Recent</div><button className="btn ghost sm" onClick={() => go("alerts")}>View all</button></div>
-          {events.slice(0, 4).map((e) => evRow(e, false))}
-          {!events.length && <div className="sm dim">All quiet.</div>}
-        </div>
-      </div>
-    </div>
-  );
+  const TABS = [["live", "Live", Radar], ["alerts", "Alerts", Bell], ["detect", "Detection", Settings2], ["faces", "Faces", Users]] as const;
+  const tiles: [string, typeof Activity, string, number][] = [
+    ["Motion", Activity, st ? `${(st.motion * 100).toFixed(1)}%` : "—", st ? Math.min(1, st.motion / 0.2) : 0],
+    ["Light", Lightbulb, st ? st.light.toFixed(0) : "—", st ? st.light / 255 : 0],
+    ["Sound", Waves, st ? (st.sound * 100).toFixed(1) : "—", st ? Math.min(1, st.sound / 0.3) : 0],
+    ["Tracked", PersonStanding, st ? `${st.persons} · ${st.faces}` : "—", st ? Math.min(1, (st.persons + st.faces) / 4) : 0],
+  ];
 
   function calibCard() {
-    const dev = st?.calibState === 2 ? st.dev : 0;
+    const zeroed = st?.calibState === 2;
+    const dev = zeroed ? st!.dev : 0;
     const trip = settings.calib.trip;
     const max = Math.max(10, trip * 2.5);
-    const col = dev > trip ? "var(--bad)" : dev > trip * 0.6 ? "var(--warn)" : "var(--ok)";
-    const status = !st ? "Waiting for sentry" : st.calibState === 1 ? `Learning zero point…${hasStream ? ` ${Math.round(prog * 100)}%` : ""}` : st.calibState === 2 ? `Zeroed ${ago(st.calibAt)}` : "Not zeroed";
+    const col = dev > trip ? "#fb7185" : dev > trip * 0.6 ? "#fbbf24" : "#34d399";
+    const status = !st ? "Waiting for sentry" : st.calibState === 1 ? `Learning zero point${hasStream ? ` · ${Math.round(prog * 100)}%` : "…"}` : zeroed ? `Zeroed ${ago(st.calibAt)}` : "Not zeroed";
     return (
       <div className="card">
         <div className="card-h">
-          <div className="card-t"><Crosshair size={14} />Calibrate</div>
+          <div className="eyebrow"><Crosshair size={13} />Calibration</div>
           <Toggle on={settings.calib.on} set={(on) => update({ calib: { ...settings.calib, on } })} />
         </div>
-        <div className="row between" style={{ alignItems: "flex-end" }}>
-          <div><div className="big" style={{ color: st?.calibState === 2 ? col : "var(--dim)" }}>{st?.calibState === 2 ? dev.toFixed(1) : "—"}<span style={{ fontSize: 16, color: "var(--mut)" }}>%</span></div><div className="xs mut" style={{ marginTop: 4 }}>deviation from zero</div></div>
+        <div className="gauge-wrap">
+          <Gauge value={dev} trip={trip} max={max} color={col} active={zeroed} />
+          <div className="gauge-val">
+            <div><span className="n" style={{ color: zeroed ? "var(--tx)" : "var(--dim)" }}>{zeroed ? dev.toFixed(1) : "—"}</span><span className="u">%</span></div>
+            <div className="xs mut" style={{ marginTop: 6 }}>deviation from zero</div>
+          </div>
+        </div>
+        <div className="row between" style={{ marginTop: 4 }}>
+          <span className={`chip ${!st ? "" : st.calibState === 1 ? "ac" : zeroed ? (dev > trip ? "bad" : "ok") : "warn"}`}>
+            {st?.calibState === 1 && <span className="dot pulse" />}{status}
+          </span>
           <button className="btn pri" onClick={zero} disabled={!online}><Crosshair size={16} />Set zero</button>
         </div>
-        <div className="gauge" style={{ marginTop: 16 }}>
-          <i style={{ width: `${Math.min(100, (dev / max) * 100)}%`, background: col }} />
-          <b style={{ left: `calc(${(trip / max) * 100}% - 1px)` }} title="Trip point" />
-        </div>
-        <div className="row between xs dim mono" style={{ marginTop: 6 }}><span>0</span><span>trip {trip}%</span><span>{max.toFixed(0)}%</span></div>
-        <div className="sm mut" style={{ marginTop: 10 }}>{status}</div>
         <Range label="Trip point" value={trip} min={0.5} max={25} step={0.5} fmt={(v) => `${v}%`} set={(v) => update({ calib: { ...settings.calib, trip: v } })} />
-        <div className="xs dim" style={{ marginTop: 10 }}>Set zero with the room as it should be. Anything that changes the scene beyond the trip point — a door opening, an object moved, a light — triggers an alert.</div>
+        <div className="xs dim" style={{ marginTop: 12, lineHeight: 1.55 }}>Zero the room as it should be. Any change beyond the trip point — a door, a moved object, a light — raises an alert.</div>
       </div>
     );
   }
@@ -267,20 +259,20 @@ export default function Console() {
   function evRow(e: ArgusEvent, expandable: boolean) {
     const m = META[e.type] ?? META.motion;
     return (
-      <div key={e.id} className={`ev ${fresh.has(e.id) ? "new" : ""}`} onClick={() => (expandable ? expand(e) : go("alerts"))}>
-        <div className="ev-ic" style={{ background: `${m.c}1f`, color: m.c }}><m.Icon size={17} /></div>
+      <div key={e.id} className={`ev ${fresh.has(e.id) ? "new" : ""} ${expandable && open === e.id ? "open" : ""}`} onClick={() => (expandable ? expand(e) : go("alerts"))}>
+        <div className="ic" style={{ background: `${m.c}18`, color: m.c, boxShadow: `inset 0 0 0 1px ${m.c}30` }}><m.Icon size={18} /></div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.label}</div>
+          <div style={{ fontWeight: 550, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.label}</div>
           <div className="xs mut">{m.name} · {clock(e.ts)}</div>
         </div>
         <div className="xs dim mono">{ago(e.ts)}</div>
         {expandable && open === e.id && (
           <div className="ev-body" onClick={(x) => x.stopPropagation()}>
-            {snap?.img ? <img src={snap.img} alt="Snapshot" /> : <div className="sm dim">{e.snap ? "Loading snapshot…" : "No snapshot"}</div>}
+            {snap?.img ? <img src={snap.img} alt="Snapshot" /> : <div className="sm dim">{e.snap ? "Loading snapshot…" : "No snapshot for this alert."}</div>}
             {snap?.desc && (
-              <div className="row" style={{ marginTop: 10 }}>
-                <input className="input" placeholder="Who is this? Name to learn this face" value={learnName} onChange={(x) => setLearnName(x.target.value)} />
-                <button className="btn good" onClick={learn}><ScanFace size={16} />Learn</button>
+              <div className="row" style={{ marginTop: 12, gap: 8 }}>
+                <input className="input" style={{ height: 40 }} placeholder="Name this person to learn their face" value={learnName} onChange={(x) => setLearnName(x.target.value)} />
+                <button className="btn good" style={{ height: 40 }} onClick={learn}><ScanFace size={16} />Learn</button>
               </div>
             )}
           </div>
@@ -289,74 +281,129 @@ export default function Console() {
     );
   }
 
+  const live = (
+    <div className="layout">
+      <div className="stack">
+        <div ref={stageRef} className="stage" style={{ aspectRatio: ratio }}>
+          <video ref={videoRef} playsInline autoPlay muted onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.videoWidth) setRatio(v.videoWidth / v.videoHeight); }} style={{ display: hasStream ? "block" : "none" }} />
+          {!hasStream && hb?.thumb && online && <img src={hb.thumb} alt="Latest frame" />}
+          <canvas ref={canvasRef} />
+          {!hasStream && !(hb?.thumb && online) && (
+            <div className="empty"><div>
+              <div className="radar" />
+              <div className="title">{online ? "Connecting to sentry" : "Sentry offline"}</div>
+              <div className="sm dim" style={{ marginTop: 4 }}>{online ? "Establishing a secure peer link…" : "Open Sentry on the camera phone and tap Activate."}</div>
+            </div></div>
+          )}
+          <div className="hud">
+            {hasStream ? <span className="chip bad"><span className="dot pulse" />Live</span>
+              : online && hb?.thumb ? <span className="chip warn">Relay · {ago(hb.ts)}</span>
+              : <span className="chip">{link === "connecting" ? "Connecting…" : "No signal"}</span>}
+            {st && st.light < 25 && <span className="chip warn">Low light</span>}
+          </div>
+          {hasStream && <div className="meta">{new Date(now).toLocaleTimeString()}</div>}
+          <div className="corner">
+            <button className="btn icon sm" title="Tracking overlay" onClick={() => setOverlay(!overlay)}>{overlay ? <Eye size={15} /> : <EyeOff size={15} />}</button>
+            <button className="btn icon sm" title="Listen" onClick={() => setListen(!listen)} disabled={!hasStream}>{listen ? <Volume2 size={15} /> : <VolumeX size={15} />}</button>
+            <button className="btn icon sm" title="Fullscreen" onClick={() => stageRef.current?.requestFullscreen?.()}><Maximize2 size={15} /></button>
+          </div>
+        </div>
+        <div className="tiles">
+          {tiles.map(([k, I, v, f]) => (
+            <div className="tile" key={k}><div className="k"><I size={13} />{k}</div><div className="v">{v}</div><div className="bar"><i style={{ width: `${f * 100}%` }} /></div></div>
+          ))}
+        </div>
+        {!hasStream && online && <div className="xs dim">Live video is a direct peer-to-peer link. If your network blocks it, a relay frame refreshes every 15 seconds instead.</div>}
+      </div>
+      <div className="stack">
+        {calibCard()}
+        <div className="card" style={{ padding: 10 }}>
+          <div className="card-h" style={{ padding: "6px 8px 0" }}><div className="eyebrow"><Bell size={13} />Recent activity</div><button className="btn ghost sm" onClick={() => go("alerts")}>View all</button></div>
+          <div className="list">{events.slice(0, 4).map((e) => evRow(e, false))}</div>
+          {!events.length && <div className="sm dim" style={{ padding: "8px 10px 12px" }}>All quiet.</div>}
+        </div>
+      </div>
+    </div>
+  );
+
   const alerts = (
-    <div className="stack" style={{ maxWidth: 760 }}>
+    <div className="stack narrow">
       <div className="card">
-        <div className="card-h"><div className="card-t"><Bell size={14} />Alarm</div>
+        <div className="card-h" style={{ marginBottom: 4 }}>
+          <div><div className="title">Alarm</div><div className="xs mut">Plays on this device when an alert arrives</div></div>
           <div className="row" style={{ gap: 6 }}>
             <button className="btn sm" onClick={() => playAlarm("critical", volume)}>Test</button>
-            <button className="btn sm" onClick={() => setMuted(!muted)}>{muted ? <><BellOff size={14} />Muted</> : <><Bell size={14} />Sound on</>}</button>
+            <button className={`btn sm ${muted ? "danger" : ""}`} onClick={() => setMuted(!muted)}>{muted ? <><BellOff size={14} />Muted</> : <><Bell size={14} />On</>}</button>
           </div>
         </div>
         <Range label="Volume" value={Math.round(volume * 100)} min={10} max={100} step={10} fmt={(v) => `${v}%`} set={(v) => setVolume(v / 100)} />
       </div>
-      <div className="row between"><div className="card-t">{events.length} events</div>
-        {!!events.length && <button className="btn danger sm" onClick={async () => { await api("/api/events", { method: "DELETE" }); setEvents([]); }}><Trash2 size={14} />Clear</button>}</div>
-      <div>{events.map((e) => evRow(e, true))}</div>
-      {!events.length && <div className="card sm dim" style={{ textAlign: "center", padding: 30 }}>No alerts yet.</div>}
+      <div className="card" style={{ padding: 10 }}>
+        <div className="card-h" style={{ padding: "6px 8px 0" }}>
+          <div className="eyebrow">{events.length} events</div>
+          {!!events.length && <button className="btn danger sm" onClick={async () => { await api("/api/events", { method: "DELETE" }); setEvents([]); }}><Trash2 size={14} />Clear</button>}
+        </div>
+        <div className="list">{events.map((e) => evRow(e, true))}</div>
+        {!events.length && <div style={{ textAlign: "center", padding: "40px 10px" }}><Bell size={26} className="dim" /><div className="mut" style={{ marginTop: 8 }}>No alerts yet</div></div>}
+      </div>
     </div>
   );
 
   const det = (k: "person" | "motion" | "light" | "sound", Icon: typeof Activity, title: string, hint: string) => (
     <div className="card" key={k}>
       <div className="row">
-        <div className="ev-ic" style={{ background: "var(--s2)", color: settings[k].on ? "var(--ac)" : "var(--dim)" }}><Icon size={17} /></div>
-        <div className="grow"><div style={{ fontWeight: 600 }}>{title}</div><div className="sm mut">{hint}</div></div>
+        <div className="ic" style={{ background: settings[k].on ? "rgba(34,211,238,.1)" : "var(--glass-2)", color: settings[k].on ? "var(--ac)" : "var(--dim)" }}><Icon size={18} /></div>
+        <div className="grow"><div className="title">{title}</div><div className="sm mut">{hint}</div></div>
         <Toggle on={settings[k].on} set={(on) => update({ [k]: { ...settings[k], on } })} />
       </div>
-      {settings[k].on && <Range label="Sensitivity" value={settings[k].sens} min={1} max={10} fmt={(v) => (v <= 3 ? `${v} · low` : v >= 8 ? `${v} · high` : `${v}`)} set={(sens) => update({ [k]: { ...settings[k], sens } })} />}
+      {settings[k].on && <Range label="Sensitivity" value={settings[k].sens} min={1} max={10} fmt={(v) => (v <= 3 ? `Low · ${v}` : v >= 8 ? `High · ${v}` : `Medium · ${v}`)} set={(sens) => update({ [k]: { ...settings[k], sens } })} />}
+    </div>
+  );
+  const faceRow = (on: boolean, set: (v: boolean) => void, Icon: typeof Activity, title: string, hint: string) => (
+    <div className="row">
+      <div className="ic" style={{ background: on ? "rgba(34,211,238,.1)" : "var(--glass-2)", color: on ? "var(--ac)" : "var(--dim)" }}><Icon size={18} /></div>
+      <div className="grow"><div className="title">{title}</div><div className="sm mut">{hint}</div></div>
+      <Toggle on={on} set={set} />
     </div>
   );
   const detect = (
-    <div className="stack" style={{ maxWidth: 760 }}>
-      {det("person", PersonStanding, "Humans", "AI body tracking (skeleton). Confirmed across frames.")}
-      {det("motion", Activity, "Movement", "Coherent moving regions; ignores sensor noise and exposure shifts.")}
-      {det("light", Lightbulb, "Light change", "Lights switched on/off, flashlights, headlights.")}
-      {det("sound", Mic, "Sound", "Sustained noise or sharp impacts (knocks, bangs, glass).")}
+    <div className="stack narrow">
+      {det("person", PersonStanding, "Humans", "Skeleton tracking, confirmed across frames")}
+      {det("motion", Activity, "Movement", "Coherent moving regions; ignores noise and exposure shifts")}
+      {det("light", Lightbulb, "Light change", "Lights on or off, flashlights, headlights")}
+      {det("sound", Mic, "Sound", "Sustained noise or sharp impacts")}
       <div className="card">
-        <div className="row"><div className="ev-ic" style={{ background: "var(--s2)", color: settings.faceUnknown.on ? "var(--ac)" : "var(--dim)" }}><UserX size={17} /></div>
-          <div className="grow"><div style={{ fontWeight: 600 }}>Unknown faces</div><div className="sm mut">Faces not in your learned list (confirmed twice).</div></div>
-          <Toggle on={settings.faceUnknown.on} set={(on) => update({ faceUnknown: { on } })} /></div>
-        <div className="sep" />
-        <div className="row"><div className="ev-ic" style={{ background: "var(--s2)", color: settings.faceKnown.on ? "var(--ac)" : "var(--dim)" }}><UserCheck size={17} /></div>
-          <div className="grow"><div style={{ fontWeight: 600 }}>Known faces</div><div className="sm mut">Also notify when someone you taught it appears.</div></div>
-          <Toggle on={settings.faceKnown.on} set={(on) => update({ faceKnown: { on } })} /></div>
+        {faceRow(settings.faceUnknown.on, (on) => update({ faceUnknown: { on } }), UserX, "Unknown faces", "Anyone not in your known list")}
+        <div className="divider" />
+        {faceRow(settings.faceKnown.on, (on) => update({ faceKnown: { on } }), UserCheck, "Known faces", "Also notify when someone you know appears")}
       </div>
       <div className="card">
-        <div className="card-t"><Settings2 size={14} />General</div>
+        <div className="title">General</div>
         <Range label="Cooldown between alerts of the same type" value={settings.cooldown} min={2} max={120} fmt={(v) => `${v}s`} set={(cooldown) => update({ cooldown })} />
-        <Range label="Arm delay (time to leave the room)" value={settings.armDelay} min={0} max={120} fmt={(v) => `${v}s`} set={(armDelay) => update({ armDelay })} />
-        <div className="row between" style={{ marginTop: 14 }}><span className="sm mut">Attach snapshots to alerts</span><Toggle on={settings.snapshots} set={(snapshots) => update({ snapshots })} /></div>
+        <Range label="Arm delay" value={settings.armDelay} min={0} max={120} fmt={(v) => `${v}s`} set={(armDelay) => update({ armDelay })} />
+        <div className="divider" />
+        <div className="row between"><div><div style={{ fontWeight: 550 }}>Snapshots</div><div className="xs mut">Attach an annotated frame to each alert</div></div><Toggle on={settings.snapshots} set={(snapshots) => update({ snapshots })} /></div>
       </div>
     </div>
   );
 
   const facesTab = (
-    <div className="stack" style={{ maxWidth: 760 }}>
-      <div className="card">
-        <div className="card-h"><div className="card-t"><Users size={14} />Known faces</div><span className="xs dim">{faces.length} people</span></div>
+    <div className="stack narrow">
+      <div className="card" style={{ padding: 10 }}>
+        <div className="card-h" style={{ padding: "6px 8px 0" }}><div className="eyebrow"><Users size={13} />Known people</div><span className="xs dim">{faces.length}</span></div>
         {faces.map((f) => (
-          <div className="row between" key={f.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line)" }}>
-            <div className="row"><div className="ev-ic" style={{ background: "rgba(16,185,129,.12)", color: "var(--ok)" }}><UserCheck size={17} /></div>
-              <div><div style={{ fontWeight: 500 }}>{f.name}</div><div className="xs mut">{f.descs.length} sample{f.descs.length === 1 ? "" : "s"}{f.descs.length < 3 ? " · add more for accuracy" : ""}</div></div></div>
-            <button className="btn danger sm" onClick={async () => setFaces(await api(`/api/faces?id=${f.id}`, { method: "DELETE" }))}><Trash2 size={14} /></button>
+          <div className="ev" key={f.id} style={{ cursor: "default" }}>
+            <div className="ic" style={{ background: "rgba(52,211,153,.1)", color: "var(--ok)", fontWeight: 650 }}>{f.name.slice(0, 1).toUpperCase()}</div>
+            <div><div style={{ fontWeight: 550 }}>{f.name}</div><div className="xs mut">{f.descs.length} sample{f.descs.length === 1 ? "" : "s"}{f.descs.length < 3 ? " · add more for accuracy" : ""}</div></div>
+            <button className="btn ghost icon sm" title="Remove" onClick={async () => setFaces(await api(`/api/faces?id=${f.id}`, { method: "DELETE" }))}><Trash2 size={15} /></button>
           </div>
         ))}
-        {!faces.length && <div className="sm dim">Nobody learned yet.</div>}
+        {!faces.length && <div style={{ textAlign: "center", padding: "36px 10px" }}><ScanFace size={26} className="dim" /><div className="mut" style={{ marginTop: 8 }}>Nobody learned yet</div></div>}
       </div>
-      <div className="card sm mut" style={{ display: "grid", gap: 6 }}>
-        <div><b style={{ color: "var(--tx)" }}>Teach a face:</b> on the Sentry phone tap <i>Learn face</i>, or open an <i>Unknown face</i> alert here and name it.</div>
-        <div>3–5 samples per person from different angles gives reliable recognition. Distant faces are shown but not judged.</div>
+      <div className="card bullets">
+        <div><span className="n">1</span><div><b>On the sentry</b>, tap Learn face with one person in frame.</div></div>
+        <div><span className="n">2</span><div><b>Or from an alert</b> — open an Unknown face alert and name it.</div></div>
+        <div><span className="n">3</span><div><b>3–5 samples</b> per person from different angles gives reliable recognition.</div></div>
       </div>
     </div>
   );
@@ -365,28 +412,33 @@ export default function Console() {
     <>
       <div className="top">
         <div className="top-in">
-          <div className="brand"><div className="brand-mark"><Eye size={15} /></div>ARGUS</div>
+          <div className="brand"><div className="mark"><Eye size={16} strokeWidth={2.4} /></div>Argus</div>
           <div className="grow" />
-          <span className={`pill ${online ? "ok" : "bad"}`}><span className={`dot ${online ? "pulse" : ""}`} />{online ? "Online" : "Offline"}</span>
-          {hb?.battery != null && <span className="pill mono">{Math.round(hb.battery * 100)}%{hb.charging ? " ⚡" : ""}</span>}
+          <div className="seg">
+            {TABS.map(([k, l, I]) => (
+              <button key={k} className={tab === k ? "on" : ""} onClick={() => go(k)}><I size={15} />{l}{k === "alerts" && unseen > 0 && <span className="count">{unseen}</span>}</button>
+            ))}
+          </div>
+          <div className="grow" />
+          <span className={`chip ${online ? "ok" : "bad"}`}><span className={`dot ${online ? "pulse" : ""}`} />{online ? "Online" : "Offline"}{hb?.battery != null && online && <span className="mono" style={{ opacity: .8 }}>· {Math.round(hb.battery * 100)}%{hb.charging ? "⚡" : ""}</span>}</span>
           <button className={`btn sm ${settings.armed ? "danger" : "good"}`} onClick={() => update({ armed: !settings.armed })}>
             {settings.armed ? <><Shield size={14} />Armed</> : <><ShieldOff size={14} />Disarmed</>}
           </button>
         </div>
       </div>
       <div className="shell">
-        <div className="tabs">
-          {([["live", "Live", Radar], ["alerts", "Alerts", Bell], ["detect", "Detection", Settings2], ["faces", "Faces", Users]] as const).map(([k, l, I]) => (
-            <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => go(k)}><I size={15} />{l}{k === "alerts" && unseen > 0 && <span className="count">{unseen}</span>}</button>
-          ))}
-        </div>
-        {err && <div className="card sm" style={{ color: "var(--bad)", borderColor: "rgba(244,63,94,.4)", marginBottom: 14 }}>{err}</div>}
+        {err && <div className="card sm" style={{ color: "var(--bad)", borderColor: "rgba(251,113,133,.35)", marginBottom: 16, padding: 14 }}>{err}</div>}
         {tab === "live" ? live : tab === "alerts" ? alerts : tab === "detect" ? detect : facesTab}
       </div>
+      <nav className="mobile-tabs">
+        {TABS.map(([k, l, I]) => (
+          <button key={k} className={tab === k ? "on" : ""} onClick={() => go(k)}><I size={20} />{l}{k === "alerts" && unseen > 0 && <span className="count">{unseen}</span>}</button>
+        ))}
+      </nav>
       {toast && (
         <div className="toast" onClick={() => { setToast(null); go("alerts"); }}>
-          <div className="ev-ic" style={{ background: "rgba(244,63,94,.18)", color: "var(--bad)" }}>{(() => { const I = (META[toast.type] ?? META.motion).Icon; return <I size={18} />; })()}</div>
-          <div className="grow"><div style={{ fontWeight: 600 }}>{toast.label}</div><div className="xs mut">{clock(toast.ts)} · tap to view</div></div>
+          <div className="ic" style={{ background: "rgba(251,113,133,.18)", color: "var(--bad)" }}>{(() => { const I = (META[toast.type] ?? META.motion).Icon; return <I size={19} />; })()}</div>
+          <div className="grow"><div style={{ fontWeight: 600 }}>{toast.label}</div><div className="xs mut">{clock(toast.ts)} · tap to review</div></div>
         </div>
       )}
     </>
