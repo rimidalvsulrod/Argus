@@ -1,31 +1,48 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Crosshair, Eye, EyeOff, RefreshCw, ScanFace, X } from "lucide-react";
 import { api, getKey } from "@/lib/api";
 import { Engine } from "@/lib/engine";
-import { DEFAULT_SETTINGS, type Settings } from "@/lib/types";
+import { paint } from "@/lib/overlay";
+import { SentryLink, type Msg } from "@/lib/rtc";
+import { DEFAULT_SETTINGS, type Settings, type Stats } from "@/lib/types";
+
+type Hud = { stats: Stats; prog: number; ready: boolean; armed: boolean; viewers: number; link: boolean };
 
 export default function Camera() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const overlayRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
+  const linkRef = useRef<SentryLink | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const queue = useRef<object[]>([]);
   const [phase, setPhase] = useState<"idle" | "loading" | "live">("idle");
   const [err, setErr] = useState("");
   const [facing, setFacing] = useState<"environment" | "user">("environment");
   const [ratio, setRatio] = useState(4 / 3);
+  const [box, setBox] = useState({ w: 0, h: 0 });
   const [stealth, setStealth] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
+  const [sheet, setSheet] = useState(false);
   const [name, setName] = useState("");
   const [msg, setMsg] = useState("");
-  const [hud, setHud] = useState({ motion: 0, light: 0, sound: 0, persons: 0, ready: false, armed: true });
-  const queue = useRef<any[]>([]);
+  const [flash, setFlash] = useState("");
+  const [hud, setHud] = useState<Hud | null>(null);
 
   useEffect(() => { if (!getKey()) location.href = "/"; }, []);
 
   const flush = useCallback(async () => {
     while (queue.current.length) {
-      try { await api("/api/events", { json: queue.current[0] }); queue.current.shift(); } catch { return; }
+      try { await api("/api/events", { json: queue.current[0] }); queue.current.shift(); linkRef.current?.send({ t: "ev" }); }
+      catch { return; }
     }
+  }, []);
+
+  const onMsg = useCallback((m: Msg) => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    if (m.t === "calibrate") eng.calibrate(m.at);
+    if (m.t === "settings") eng.setSettings(m.s as Settings);
   }, []);
 
   const begin = useCallback(async (face: "environment" | "user") => {
@@ -33,123 +50,172 @@ export default function Camera() {
     try {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       engineRef.current?.stop();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: face, width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      }).catch(() => navigator.mediaDevices.getUserMedia({ video: { facingMode: face } })); // no mic? still run
+      const stream = await navigator.mediaDevices
+        .getUserMedia({
+          video: { facingMode: face, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 } },
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        })
+        .catch(() => navigator.mediaDevices.getUserMedia({ video: { facingMode: face } }));
       streamRef.current = stream;
       const v = videoRef.current!;
-      v.srcObject = stream; await v.play();
+      v.srcObject = stream;
+      await v.play();
       setRatio(v.videoWidth / v.videoHeight || 4 / 3);
       try { await (navigator as any).wakeLock?.request("screen"); } catch {}
       let settings = DEFAULT_SETTINGS;
-      try { settings = (await api<any>("/api/state")).settings; } catch {}
+      try { settings = (await api<{ settings: Settings }>("/api/state")).settings; } catch {}
       const eng = new Engine(v, settings, (e) => {
-        setLog((l) => [`${new Date().toLocaleTimeString()}  ${e.label}`, ...l].slice(0, 6));
+        setFlash(e.label); setTimeout(() => setFlash(""), 2500);
         queue.current.push({ ...e, ts: Date.now() });
         flush();
       }, stream);
       engineRef.current = eng;
+      if (linkRef.current) linkRef.current.setStream(stream);
+      else { linkRef.current = new SentryLink(stream, onMsg); linkRef.current.start().catch(() => {}); }
       setPhase("live");
       await eng.start();
-    } catch (e: any) { setErr(e.message || String(e)); setPhase("idle"); }
-  }, [flush]);
+    } catch (e: any) {
+      setErr(e?.name === "NotAllowedError" ? "Camera/microphone permission was denied. Allow it in the browser's site settings." : e.message || String(e));
+      setPhase("idle");
+    }
+  }, [flush, onMsg]);
 
-  // heartbeat: report status, pull settings + face DB changes
+  // fit the video frame inside the available area
+  useEffect(() => {
+    const el = viewRef.current;
+    if (!el) return;
+    const fit = () => {
+      const W = el.clientWidth, H = el.clientHeight;
+      setBox(W / H > ratio ? { w: H * ratio, h: H } : { w: W, h: W / ratio });
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ratio, phase]);
+
+  // heartbeat: status + peer id + thumbnail up, settings + face DB down
   useEffect(() => {
     if (phase !== "live") return;
     let rev = -1, stop = false;
     const beat = async () => {
-      const eng = engineRef.current; if (!eng || stop) return;
+      const eng = engineRef.current, link = linkRef.current;
+      if (!eng || stop) return;
       let battery: number | undefined, charging: boolean | undefined;
       try { const b = await (navigator as any).getBattery?.(); battery = b?.level; charging = b?.charging; } catch {}
       try {
-        const r = await api<{ settings: Settings; facesRev: number }>("/api/heartbeat", { json: { battery, charging } });
+        const r = await api<{ settings: Settings; facesRev: number }>("/api/heartbeat", {
+          json: { battery, charging, stats: eng.stats, peer: link?.id, token: link?.token, thumb: eng.snapshot(320, 0.5) },
+        });
         eng.setSettings(r.settings);
         if (r.facesRev !== rev) { rev = r.facesRev; eng.faces = await api("/api/faces"); }
       } catch {}
       flush();
     };
-    beat();
+    const first = setTimeout(beat, 1500);
     const t = setInterval(beat, 15000);
     const vis = () => { if (document.visibilityState === "visible") (navigator as any).wakeLock?.request("screen").catch(() => {}); };
     document.addEventListener("visibilitychange", vis);
-    return () => { stop = true; clearInterval(t); document.removeEventListener("visibilitychange", vis); };
+    return () => { stop = true; clearTimeout(first); clearInterval(t); document.removeEventListener("visibilitychange", vis); };
   }, [phase, flush]);
 
-  // HUD + detection boxes
+  // overlay at display rate; telemetry to live viewers at 5Hz; HUD at ~4Hz
   useEffect(() => {
     if (phase !== "live") return;
-    let raf = 0, tick = 0;
+    let raf = 0;
     const draw = () => {
-      const eng = engineRef.current, cv = overlayRef.current;
-      if (eng && cv) {
-        const c = cv.getContext("2d")!;
-        cv.width = cv.clientWidth; cv.height = cv.clientHeight;
-        c.lineWidth = 2; c.font = "12px monospace";
-        for (const b of eng.boxes) {
-          c.strokeStyle = c.fillStyle = b.color;
-          c.strokeRect(b.x * cv.width, b.y * cv.height, b.w * cv.width, b.h * cv.height);
-          c.fillText(b.label, b.x * cv.width + 3, Math.max(12, b.y * cv.height - 4));
-        }
-        if (++tick % 10 === 0) setHud({ motion: eng.stats.motion, light: eng.stats.light, sound: eng.stats.sound, persons: eng.stats.persons, ready: eng.ready, armed: eng.settings.armed });
-      }
+      const eng = engineRef.current;
+      if (eng && canvasRef.current) paint(canvasRef.current, eng.scene);
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-  }, [phase]);
+    const t = setInterval(() => {
+      const eng = engineRef.current, link = linkRef.current;
+      if (!eng) return;
+      link?.send({ t: "tele", d: { scene: eng.scene, stats: eng.stats, prog: eng.calibProgress, armed: eng.settings.armed, ready: eng.ready, ratio: eng ? ratio : 0 } });
+      setHud({ stats: { ...eng.stats }, prog: eng.calibProgress, ready: eng.ready, armed: eng.settings.armed, viewers: link?.viewers ?? 0, link: !!link?.online });
+    }, 220);
+    return () => { cancelAnimationFrame(raf); clearInterval(t); };
+  }, [phase, ratio]);
 
   async function learn() {
     const eng = engineRef.current;
-    if (!eng || !name.trim()) return setMsg("Enter a name first");
+    if (!eng?.ready) return setMsg("Models still loading…");
+    if (!name.trim()) return setMsg("Enter a name first.");
     setMsg("Scanning…");
     const faces = await eng.detectFaces();
-    if (faces.length !== 1) return setMsg(faces.length ? "Multiple faces — only one person in frame" : "No face found — face the camera, good light");
-    const f = await api<any[]>("/api/faces", { json: { name: name.trim(), desc: faces[0].desc } });
-    eng.faces = f;
-    setMsg(`Learned ${name.trim()}. Repeat from different angles for accuracy.`);
+    if (faces.length !== 1) return setMsg(faces.length ? "More than one face in frame — only the person being learned." : "No face found. Face the camera in good light.");
+    eng.faces = await api("/api/faces", { json: { name: name.trim(), desc: faces[0].desc } });
+    setMsg(`Learned ${name.trim()}. Capture 3–5 samples at different angles for best accuracy.`);
   }
 
-  const bar = (v: number, max: number) => <div className="bar"><i style={{ width: `${Math.min(100, (v / max) * 100)}%` }} /></div>;
+  const s = hud?.stats;
+  const cal = !s ? "" : s.calibState === 1 ? `ZEROING ${Math.round((hud!.prog || 0) * 100)}%` : s.calibState === 2 ? `DEV ${s.dev.toFixed(1)}%` : "NOT ZEROED";
+
+  if (phase === "idle") return (
+    <div className="center">
+      <div className="bg-grid" />
+      <div className="auth" style={{ position: "relative" }}>
+        <div className="hero-mark"><Eye size={26} /></div>
+        <div><div style={{ fontSize: 22, fontWeight: 700, letterSpacing: ".14em" }}>SENTRY</div><div className="mut">Turns this phone into the camera.</div></div>
+        <div className="card sm mut" style={{ display: "grid", gap: 8 }}>
+          <div>• Prop the phone where it can see the room and plug it into power.</div>
+          <div>• Keep this page open in the foreground — it holds the screen awake. Use <b>Stealth</b> to black out the screen.</div>
+          <div>• The scene is zeroed automatically on start. Hold still for 3 seconds.</div>
+        </div>
+        {err && <div className="card sm" style={{ color: "var(--bad)", borderColor: "rgba(244,63,94,.4)" }}>{err}</div>}
+        <button className="btn pri lg" onClick={() => begin(facing)}>Activate sentry</button>
+        <div className="row" style={{ justifyContent: "center" }}>
+          <button className="btn ghost sm" onClick={() => setFacing(facing === "environment" ? "user" : "environment")}>
+            <RefreshCw size={14} /> {facing === "environment" ? "Rear camera" : "Front camera"}
+          </button>
+        </div>
+      </div>
+      <video ref={videoRef} playsInline muted style={{ display: "none" }} />
+    </div>
+  );
 
   return (
-    <div className="wrap" style={{ paddingTop: 10 }}>
-      <h2>ARGUS // SENTRY {phase === "live" && <span style={{ color: hud.armed ? "var(--gr)" : "var(--am)" }}>{hud.armed ? "ARMED" : "DISARMED"}</span>}</h2>
-      <div className="vid" style={{ aspectRatio: ratio, display: phase === "idle" ? "none" : "block" }}>
-        <video ref={videoRef} playsInline muted />
-        <canvas ref={overlayRef} />
+    <div className="sentry">
+      <div className="view" ref={viewRef}>
+        <div className="frame scan" style={{ width: box.w, height: box.h }}>
+          <video ref={videoRef} playsInline muted />
+          <canvas ref={canvasRef} />
+        </div>
+        <div className="hud" style={{ position: "absolute", top: 10, left: 10, right: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <span className={`pill ${hud?.armed ? "ok" : "warn"}`}><span className="dot pulse" />{hud?.armed ? "Armed" : "Disarmed"}</span>
+          <span className={`pill ${hud?.ready ? "ac" : "warn"}`}>{hud?.ready ? "AI online" : "Loading AI…"}</span>
+          <span className={`pill ${hud?.link ? "ac" : ""}`}>{hud?.link ? `Link · ${hud.viewers} watching` : "Link offline"}</span>
+          {s && <span className="pill mono">{cal}</span>}
+          {s && s.light < 25 && <span className="pill warn">Low light</span>}
+        </div>
+        {flash && <div className="pill bad" style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", fontSize: 12 }}><span className="dot" />{flash}</div>}
       </div>
-      {phase === "idle" && (
-        <div className="panel grid">
-          <p className="dim sm">Prop the phone up, plug it in, and keep this screen open. Camera and microphone access required. Browsers pause detection if the tab is backgrounded or the screen locks — Sentry holds a wake-lock to prevent that.</p>
-          <button className="big" onClick={() => begin(facing)}>Activate sentry</button>
-          {err && <div style={{ color: "var(--rd)" }}>{err}</div>}
+      <div className="bar">
+        <div className="stats">
+          {[["Motion", s ? `${(s.motion * 100).toFixed(1)}%` : "–"], ["Light", s ? s.light.toFixed(0) : "–"], ["Sound", s ? (s.sound * 100).toFixed(1) : "–"], ["Bodies", s ? `${s.persons}/${s.faces}` : "–"]].map(([k, v]) => (
+            <div className="stat" key={k}><div className="k">{k}</div><div className="v">{v}</div></div>
+          ))}
+        </div>
+        <div className="tools">
+          <button className="btn" onClick={() => engineRef.current?.calibrate()}><Crosshair size={18} />Zero</button>
+          <button className="btn" onClick={() => { setSheet(true); setMsg(""); }}><ScanFace size={18} />Learn face</button>
+          <button className="btn" onClick={() => { const f = facing === "environment" ? "user" : "environment"; setFacing(f); begin(f); }}><RefreshCw size={18} />Flip</button>
+          <button className="btn" onClick={() => setStealth(true)}><EyeOff size={18} />Stealth</button>
+        </div>
+      </div>
+      {sheet && (
+        <div className="sheet" onClick={() => setSheet(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <div className="row between"><b>Learn a face</b><button className="btn ghost icon" onClick={() => setSheet(false)}><X size={18} /></button></div>
+            <div className="sm mut">One person in frame, facing the camera, good light. Repeat a few times from different angles.</div>
+            <input className="input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+            <button className="btn pri lg" onClick={learn}><ScanFace size={18} />Capture sample</button>
+            {msg && <div className="sm mut">{msg}</div>}
+          </div>
         </div>
       )}
-      {phase !== "idle" && (
-        <>
-          <div className="panel sm">
-            {!hud.ready ? <div style={{ color: "var(--am)" }}>Loading detection models…</div> : <div style={{ color: "var(--gr)" }}>AI online</div>}
-            <div>MOTION {(hud.motion * 100).toFixed(1)}%{bar(hud.motion, 0.15)}</div>
-            <div>LIGHT {hud.light.toFixed(0)}{bar(hud.light, 255)}</div>
-            <div>SOUND {(hud.sound * 100).toFixed(1)}{bar(hud.sound, 0.3)}</div>
-            <div>HUMANS {hud.persons}</div>
-          </div>
-          <div className="row">
-            <button onClick={() => setStealth(true)}>Stealth screen</button>
-            <button onClick={() => { const f = facing === "environment" ? "user" : "environment"; setFacing(f); begin(f); }}>Flip cam</button>
-          </div>
-          <div className="panel grid">
-            <h2>Learn a face</h2>
-            <input type="text" placeholder="Name (face the camera)" value={name} onChange={(e) => setName(e.target.value)} />
-            <button className="ok" onClick={learn}>Learn face</button>
-            {msg && <div className="sm dim">{msg}</div>}
-          </div>
-          <div className="panel sm"><h2>Local log</h2>{log.map((l, i) => <div key={i}>{l}</div>)}{!log.length && <span className="dim">No triggers yet</span>}</div>
-        </>
-      )}
-      {stealth && <div className="stealth" onClick={() => setStealth(false)}>tap to wake</div>}
+      {stealth && <div className="stealth" onClick={() => setStealth(false)}>Sentry active — tap to wake</div>}
     </div>
   );
 }

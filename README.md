@@ -1,6 +1,8 @@
 # ARGUS — hundred-eyed tripwire
 
-Turn an Android phone into a camera tripwire. Detects **humans, movement, light changes, sound, any scene change, and unknown faces** (learns faces you teach it). Alerts hit a **Console** on your viewing device with an alarm sound, vibration and snapshot. All detection runs on the phone; models are bundled in `public/models`.
+Turn an Android phone into a camera tripwire. Detects **humans (MoveNet skeleton tracking), movement, light changes, sound, unknown faces** (learns faces you teach it) and **deviation from a calibrated zero point**. The **Console** shows the live feed with a tracking overlay and raises alerts with an alarm sound, vibration and annotated snapshot. All detection runs on the phone; models are bundled in `public/models`.
+
+Live video is peer-to-peer WebRTC (PeerJS cloud signalling, no video through the backend). If a direct link can't be made, the Console falls back to a relay frame refreshed every 15s. Optional self-hosted PeerJS server: set `NEXT_PUBLIC_PEER_HOST` / `NEXT_PUBLIC_PEER_PORT` / `NEXT_PUBLIC_PEER_PATH`.
 
 ## Deploy (Vercel)
 1. Import this repo in Vercel.
@@ -10,7 +12,8 @@ Turn an Android phone into a camera tripwire. Detects **humans, movement, light 
 
 ## Use
 - **Camera phone** (Android Chrome): open the site → enter key → *Sentry* → Activate. Allow camera + mic. Prop it up, plug it in, keep the screen on (it holds a wake-lock; *Stealth screen* blacks it out).
-- **Viewing device**: open site → *Console* → Engage (unlocks alarm audio). Toggle detections, sensitivity, cooldown, arm delay, arm/disarm remotely.
+- **Viewing device**: open site → *Console* → Engage (unlocks alarm audio). Live feed, alerts, detection settings, arm/disarm.
+- **Calibrate**: Console → Live → *Set zero* with the room as it should be. The gauge shows % deviation from zero; crossing the trip point alerts.
 - **Faces**: on the Sentry page type a name and *Learn face*, or tap an "unknown face" alert in the Console and name it. Unknown-face alerts fire for anyone not learned.
 
 ## Notes
